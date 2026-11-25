@@ -1,0 +1,6 @@
+{
+  "name": "Specimen Playground",
+  "description": "2D physics ragdoll gore and contraption sandbox inspired by People Playground and Melon Sandbox.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
