@@ -12,18 +12,21 @@ import {
   Pause,
   Pin,
   Play,
+  SlidersHorizontal,
   Sparkles,
   Volume2,
   VolumeX,
   Waves,
   Zap,
 } from 'lucide-react';
-import type { HudStats, ScenePreset, ToolMode } from '../game/types';
+import type { BehaviorSettings, HudStats, ScenePreset, ToolMode } from '../game/types';
 
 interface ToolBarProps {
   activeTool: ToolMode;
   onSelectTool: (tool: ToolMode) => void;
   hudStats: HudStats;
+  behaviorSettings: BehaviorSettings;
+  onUpdateBehaviorSettings: (patch: Partial<BehaviorSettings>) => void;
   muted: boolean;
   onTogglePause: () => void;
   onToggleSlowMo: () => void;
@@ -49,6 +52,8 @@ export const ToolBar: React.FC<ToolBarProps> = ({
   activeTool,
   onSelectTool,
   hudStats,
+  behaviorSettings,
+  onUpdateBehaviorSettings,
   muted,
   onTogglePause,
   onToggleSlowMo,
@@ -57,7 +62,11 @@ export const ToolBar: React.FC<ToolBarProps> = ({
   onLoadPreset,
   spawnMenuOpen,
 }) => {
-  const [showHelp, setShowHelp] = useState(false);
+  const [openDrawer, setOpenDrawer] = useState<'none' | 'settings' | 'help'>('none');
+
+  const activeAiCount =
+    (behaviorSettings.autoWalkCrawl ? 1 : 0) +
+    (behaviorSettings.fleeOnDamage ? 1 : 0);
 
   return (
     <>
@@ -93,8 +102,28 @@ export const ToolBar: React.FC<ToolBarProps> = ({
             })}
           </div>
 
-          {/* Time & Simulation Controls */}
+          {/* Time, Behavior Settings & Utility Controls */}
           <div className="flex items-center bg-[#1c1e22] border border-[#525864] shrink-0">
+            <button
+              type="button"
+              title="Human Behavior Settings (Walk, Crawl, Flee, Paralysis)"
+              aria-label="Behavior Settings"
+              onClick={() => setOpenDrawer((cur) => (cur === 'settings' ? 'none' : 'settings'))}
+              className={`min-h-[42px] sm:min-h-[36px] sm:h-9 px-2.5 sm:px-3 flex items-center gap-1.5 text-xs font-medium border-r border-[#333740] transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
+                openDrawer === 'settings'
+                  ? 'bg-[#2a3b34] text-[#4ade80]'
+                  : activeAiCount > 0
+                  ? 'text-[#cbd5e1] hover:text-white hover:bg-[#272a31]'
+                  : 'text-[#a3aab6] hover:text-white hover:bg-[#272a31]'
+              }`}
+            >
+              <SlidersHorizontal className="w-3.5 h-3.5" />
+              <span>AI</span>
+              {activeAiCount > 0 && (
+                <span className="font-mono-lab text-[10px] text-[#4ade80]">{activeAiCount}</span>
+              )}
+            </button>
+
             <button
               type="button"
               title="Pause / Resume [Space]"
@@ -148,9 +177,9 @@ export const ToolBar: React.FC<ToolBarProps> = ({
               type="button"
               title="Controls & Presets"
               aria-label="Controls & Presets"
-              onClick={() => setShowHelp((v) => !v)}
+              onClick={() => setOpenDrawer((cur) => (cur === 'help' ? 'none' : 'help'))}
               className={`min-h-[42px] sm:min-h-[36px] sm:h-9 w-10 sm:w-9 flex items-center justify-center transition-colors cursor-pointer shrink-0 ${
-                showHelp ? 'bg-[#363b45] text-white' : 'text-[#a3aab6] hover:text-white hover:bg-[#272a31]'
+                openDrawer === 'help' ? 'bg-[#363b45] text-white' : 'text-[#a3aab6] hover:text-white hover:bg-[#272a31]'
               }`}
             >
               <HelpCircle className="w-4 h-4" />
@@ -168,8 +197,100 @@ export const ToolBar: React.FC<ToolBarProps> = ({
         </div>
       </div>
 
+      {/* Behavior / AI Settings Panel */}
+      {openDrawer === 'settings' && (
+        <div className="fixed top-14 right-2 sm:right-3 z-40 w-[min(332px,calc(100vw-16px))] bg-[#191b1f] border border-[#5a606c] p-3.5 text-xs text-[#cbd0d8]">
+          <div className="flex items-center justify-between mb-2.5 pb-1.5 border-b border-[#32363f]">
+            <span className="font-display text-base font-bold tracking-wide text-white">
+              Human Behavior Settings
+            </span>
+            <button
+              type="button"
+              onClick={() => setOpenDrawer('none')}
+              className="px-2 py-1 text-[#8f96a3] hover:text-white cursor-pointer"
+            >
+              Close
+            </button>
+          </div>
+
+          <div className="space-y-2">
+            <button
+              type="button"
+              onClick={() =>
+                onUpdateBehaviorSettings({ autoWalkCrawl: !behaviorSettings.autoWalkCrawl })
+              }
+              className="w-full min-h-[48px] p-2.5 bg-[#202329] hover:bg-[#272b33] border border-[#3a3f4a] flex items-center justify-between gap-3 text-left cursor-pointer"
+            >
+              <div className="min-w-0">
+                <div className="font-semibold text-[#f1f5f9]">Walk &amp; Crawl Around</div>
+                <div className="text-[11px] text-[#94a3b8] leading-snug mt-0.5">
+                  Humans walk freely and crawl with their arms if their legs are shot or paralyzed.
+                </div>
+              </div>
+              <span
+                className={`px-2 py-1 text-[11px] font-mono-lab border shrink-0 ${
+                  behaviorSettings.autoWalkCrawl
+                    ? 'bg-[#14532d] border-[#22c55e] text-[#86efac]'
+                    : 'bg-[#17191d] border-[#444954] text-[#8f96a3]'
+                }`}
+              >
+                {behaviorSettings.autoWalkCrawl ? 'ON' : 'OFF'}
+              </span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() =>
+                onUpdateBehaviorSettings({ fleeOnDamage: !behaviorSettings.fleeOnDamage })
+              }
+              className="w-full min-h-[48px] p-2.5 bg-[#202329] hover:bg-[#272b33] border border-[#3a3f4a] flex items-center justify-between gap-3 text-left cursor-pointer"
+            >
+              <div className="min-w-0">
+                <div className="font-semibold text-[#f1f5f9]">Flee When Damaged</div>
+                <div className="text-[11px] text-[#94a3b8] leading-snug mt-0.5">
+                  Injured humans panic and try to run or crawl away from you when hurt.
+                </div>
+              </div>
+              <span
+                className={`px-2 py-1 text-[11px] font-mono-lab border shrink-0 ${
+                  behaviorSettings.fleeOnDamage
+                    ? 'bg-[#14532d] border-[#22c55e] text-[#86efac]'
+                    : 'bg-[#17191d] border-[#444954] text-[#8f96a3]'
+                }`}
+              >
+                {behaviorSettings.fleeOnDamage ? 'ON' : 'OFF'}
+              </span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() =>
+                onUpdateBehaviorSettings({ spinalParalysis: !behaviorSettings.spinalParalysis })
+              }
+              className="w-full min-h-[48px] p-2.5 bg-[#202329] hover:bg-[#272b33] border border-[#3a3f4a] flex items-center justify-between gap-3 text-left cursor-pointer"
+            >
+              <div className="min-w-0">
+                <div className="font-semibold text-[#f1f5f9]">Spinal Trauma Paralysis</div>
+                <div className="text-[11px] text-[#94a3b8] leading-snug mt-0.5">
+                  Severe torso or neck hits can cause leg or full-body paralysis (or use Paralytic Syringe).
+                </div>
+              </div>
+              <span
+                className={`px-2 py-1 text-[11px] font-mono-lab border shrink-0 ${
+                  behaviorSettings.spinalParalysis
+                    ? 'bg-[#14532d] border-[#22c55e] text-[#86efac]'
+                    : 'bg-[#17191d] border-[#444954] text-[#8f96a3]'
+                }`}
+              >
+                {behaviorSettings.spinalParalysis ? 'ON' : 'OFF'}
+              </span>
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Compact Help & Preset Drawer */}
-      {showHelp && (
+      {openDrawer === 'help' && (
         <div className="fixed top-14 right-2 sm:right-3 z-40 w-[min(328px,calc(100vw-16px))] max-h-[calc(100vh-80px)] overflow-y-auto lab-scroll bg-[#191b1f] border border-[#5a606c] p-3.5 text-xs text-[#cbd0d8]">
           <div className="flex items-center justify-between mb-2.5 pb-1.5 border-b border-[#32363f]">
             <span className="font-display text-base font-bold tracking-wide text-white">
@@ -177,7 +298,7 @@ export const ToolBar: React.FC<ToolBarProps> = ({
             </span>
             <button
               type="button"
-              onClick={() => setShowHelp(false)}
+              onClick={() => setOpenDrawer('none')}
               className="px-2 py-1 text-[#8f96a3] hover:text-white cursor-pointer"
             >
               Close
@@ -210,7 +331,7 @@ export const ToolBar: React.FC<ToolBarProps> = ({
                   type="button"
                   onClick={() => {
                     onLoadPreset(p);
-                    setShowHelp(false);
+                    setOpenDrawer('none');
                   }}
                   className="min-h-[38px] py-1.5 px-2 bg-[#252830] hover:bg-[#353a46] border border-[#4c525f] text-[11px] text-[#e4e6eb] capitalize cursor-pointer"
                 >

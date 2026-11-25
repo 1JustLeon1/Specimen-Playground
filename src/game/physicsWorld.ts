@@ -3,6 +3,7 @@ import { soundEngine } from './audio';
 import { getCatalogItem } from './catalog';
 import { drawEntitySprite, SPECIES_PALETTE } from './sprites';
 import type {
+  BehaviorSettings,
   ConnectionKind,
   ContextMenuState,
   DynamicLight,
@@ -10,6 +11,7 @@ import type {
   HudStats,
   InspectSnapshot,
   LimbPart,
+  ParalysisState,
   Particle,
   Projectile,
   RagdollJoint,
@@ -82,6 +84,11 @@ export class PhysicsSandboxWorld {
   private selectedSpawnId: string | null = null;
   private inspectedEntityId: string | null = null;
   private selectedEntityId: string | null = null;
+  private behaviorSettings: BehaviorSettings = {
+    autoWalkCrawl: false,
+    fleeOnDamage: true,
+    spinalParalysis: true,
+  };
 
   private mouseScreen = { x: 0, y: 0 };
   private mouseWorld = { x: WORLD_WIDTH / 2, y: FLOOR_Y - 200 };
@@ -414,6 +421,7 @@ export class PhysicsSandboxWorld {
       syringe_adrenaline: 0.0025,
       syringe_painkiller: 0.0025,
       syringe_knockout: 0.0025,
+      syringe_paralyze: 0.0025,
       syringe_freeze: 0.0025,
       syringe_strength: 0.0025,
       syringe_acid: 0.0025,
@@ -474,6 +482,7 @@ export class PhysicsSandboxWorld {
       syringe_adrenaline: 'adrenaline',
       syringe_painkiller: 'painkiller',
       syringe_knockout: 'knockout',
+      syringe_paralyze: 'paralyze',
       syringe_freeze: 'freeze',
       syringe_strength: 'strength',
       syringe_acid: 'acid',
@@ -568,10 +577,10 @@ export class PhysicsSandboxWorld {
       lowerArmL: { dx: -2, dy: -6, w: 9, h: 28, hp: isAndroid ? 150 : 98 },
       upperArmR: { dx: 2, dy: -34, w: 10, h: 28, hp: isAndroid ? 160 : 105 },
       lowerArmR: { dx: 2, dy: -6, w: 9, h: 28, hp: isAndroid ? 150 : 98 },
-      upperLegL: { dx: -2, dy: 20, w: 11, h: 34, hp: isAndroid ? 185 : 125 },
-      lowerLegL: { dx: -2, dy: 54, w: 10, h: 36, hp: isAndroid ? 175 : 118 },
-      upperLegR: { dx: 2, dy: 20, w: 11, h: 34, hp: isAndroid ? 185 : 125 },
-      lowerLegR: { dx: 2, dy: 54, w: 10, h: 36, hp: isAndroid ? 175 : 118 },
+      upperLegL: { dx: -1.5, dy: 20, w: 11, h: 34, hp: isAndroid ? 185 : 125 },
+      lowerLegL: { dx: -1.5, dy: 53, w: 10, h: 36, hp: isAndroid ? 175 : 118 },
+      upperLegR: { dx: 1.5, dy: 20, w: 11, h: 34, hp: isAndroid ? 185 : 125 },
+      lowerLegR: { dx: 1.5, dy: 53, w: 10, h: 36, hp: isAndroid ? 175 : 118 },
     };
 
     const limbIds = {} as Record<LimbPart, string>;
@@ -582,9 +591,9 @@ export class PhysicsSandboxWorld {
       const body = Matter.Bodies.rectangle(x + spec.dx, safeY + spec.dy, spec.w, spec.h, {
         collisionFilter: { group },
         density: isAndroid ? 0.0055 : 0.0028,
-        friction: part.startsWith('lowerLeg') ? 0.95 : 0.55,
-        restitution: 0.06,
-        frictionAir: 0.016,
+        friction: part.startsWith('lowerLeg') ? 1.0 : 0.55,
+        restitution: 0.04,
+        frictionAir: 0.018,
       });
 
       const ent: GameEntity = {
@@ -665,8 +674,8 @@ export class PhysicsSandboxWorld {
         pointA: jd.pA,
         pointB: jd.pB,
         length: 0,
-        stiffness: 0.92,
-        damping: 0.14,
+        stiffness: 0.96,
+        damping: 0.16,
       });
       Matter.Composite.add(this.world, constraint);
       joints.push({
@@ -705,11 +714,26 @@ export class PhysicsSandboxWorld {
       knockoutTimer: 0,
       superStrength: false,
       boneRotRate: 0,
+      paralysis: 'none',
+      gaitPhase: Math.random() * Math.PI * 2,
+      moveDir: Math.random() < 0.5 ? 1 : -1,
+      aiTimer: 1.5 + Math.random() * 3.5,
+      aiWalking: true,
+      panicTimer: 0,
+      threatX: x,
     };
 
     this.ragdolls.set(ragdollId, ragdoll);
     this.pushHudStats();
     return limbEntities.upperTorso;
+  }
+
+  public setBehaviorSettings(settings: Partial<BehaviorSettings>) {
+    this.behaviorSettings = { ...this.behaviorSettings, ...settings };
+  }
+
+  public getBehaviorSettings(): BehaviorSettings {
+    return { ...this.behaviorSettings };
   }
 
   // ==================== CONTEXT MENU ACTIONS ====================
@@ -726,6 +750,7 @@ export class PhysicsSandboxWorld {
       | 'inspect'
       | 'heal'
       | 'bandage'
+      | 'paralyze'
       | 'delete'
   ) {
     const entity = this.entities.get(entityId);
@@ -796,6 +821,26 @@ export class PhysicsSandboxWorld {
       case 'bandage': {
         if (entity.kind === 'limb') {
           this.applyBandageToLimb(entity);
+        }
+        break;
+      }
+      case 'paralyze': {
+        if (entity.ragdollId) {
+          const rd = this.ragdolls.get(entity.ragdollId);
+          if (rd) {
+            const nextOrder: Record<ParalysisState, ParalysisState> = {
+              none: 'lower',
+              lower: 'full',
+              full: 'none',
+            };
+            rd.paralysis = nextOrder[rd.paralysis];
+            soundEngine.playClick(rd.paralysis === 'none' ? 680 : 320);
+            if (rd.paralysis !== 'none') {
+              const torso = this.entities.get(rd.limbIds.upperTorso);
+              if (torso) this.spawnSparks(torso.body.position.x, torso.body.position.y, 8);
+            }
+            this.pushInspectSnapshot();
+          }
         }
         break;
       }
@@ -1329,6 +1374,7 @@ export class PhysicsSandboxWorld {
       adrenaline: '#facc15',
       painkiller: '#fb923c',
       knockout: '#2563eb',
+      paralyze: '#6366f1',
       freeze: '#7dd3fc',
       strength: '#ea580c',
       acid: '#a3e635',
@@ -1365,6 +1411,7 @@ export class PhysicsSandboxWorld {
         rd.shock = Math.max(0, rd.shock - 60);
         rd.knockoutTimer = 0;
         rd.boneRotRate = 0;
+        rd.paralysis = 'none';
         rd.consciousness = Math.min(100, rd.consciousness + 55);
         if (head && !head.isSevered) {
           rd.alive = true;
@@ -1384,8 +1431,9 @@ export class PhysicsSandboxWorld {
         break;
       }
       case 'mend': {
-        // Mending serum repairs tissue & restores joint integrity
+        // Mending serum repairs tissue, restores joint integrity & repairs nerve pathways
         rd.boneRotRate = 0;
+        rd.paralysis = 'none';
         for (const j of rd.joints) {
           if (!j.broken) j.damage = 0;
         }
@@ -1427,6 +1475,14 @@ export class PhysicsSandboxWorld {
         rd.consciousness = 0;
         rd.adrenaline = 0;
         if (rd.alive) rd.heartRate = Math.max(38, rd.heartRate * 0.6);
+        break;
+      }
+      case 'paralyze': {
+        // Motor nerve blocker — induces full paralysis while keeping subject awake and alive
+        rd.paralysis = 'full';
+        rd.panicTimer = Math.max(rd.panicTimer, 10);
+        rd.threatX = this.mouseWorld.x;
+        rd.shock = Math.min(100, rd.shock + 15);
         break;
       }
       case 'freeze': {
@@ -1561,10 +1617,45 @@ export class PhysicsSandboxWorld {
       }
     }
 
-    // Physiological shock & bleeding
+    // Physiological shock, flee panic, & spinal trauma paralyzation
     const shockMult = rd.painkillerTimer > 0 ? 0.15 : 1.0;
     rd.shock = Math.min(100, rd.shock + effectiveAmount * (type === 'blunt' ? 0.45 : 0.65) * shockMult);
-    rd.adrenaline = Math.min(100, rd.adrenaline + effectiveAmount * 0.35);
+    rd.adrenaline = Math.min(100, rd.adrenaline + effectiveAmount * 0.45);
+
+    // Trigger flee panic when damaged (away from player cursor / threat)
+    if (rd.alive && (type !== 'blunt' || effectiveAmount > 8)) {
+      rd.panicTimer = Math.max(rd.panicTimer, 14);
+      const torsoRef = this.entities.get(rd.limbIds.upperTorso);
+      const distToMouse = torsoRef
+        ? Math.hypot(this.mouseWorld.x - torsoRef.body.position.x, this.mouseWorld.y - torsoRef.body.position.y)
+        : 9999;
+      rd.threatX = distToMouse < 950 ? this.mouseWorld.x : hitWorldPos.x - dirX * 25;
+      if (torsoRef) {
+        rd.moveDir = torsoRef.body.position.x >= rd.threatX ? 1 : -1;
+      }
+    }
+
+    // Realistic anatomical spinal paralysis from severe lumbar/cervical trauma
+    if (this.behaviorSettings.spinalParalysis && rd.alive && !isAndroid) {
+      if (
+        entity.limbPart === 'lowerTorso' &&
+        rd.paralysis === 'none' &&
+        (entity.health < entity.maxHealth * 0.48 || (type === 'bullet' && effectiveAmount >= 34))
+      ) {
+        rd.paralysis = 'lower';
+        this.spawnSparks(entity.body.position.x, entity.body.position.y, 5);
+      } else if (
+        (entity.limbPart === 'upperTorso' || entity.limbPart === 'head') &&
+        rd.paralysis !== 'full' &&
+        entity.health > 0 &&
+        entity.health < entity.maxHealth * 0.32 &&
+        (type === 'bullet' || type === 'sharp' || type === 'blast' || type === 'blunt')
+      ) {
+        rd.paralysis = 'full';
+        this.spawnSparks(entity.body.position.x, entity.body.position.y, 7);
+      }
+    }
+
     if (entity.limbPart === 'head') {
       rd.consciousness = Math.max(0, rd.consciousness - effectiveAmount * 0.95 * shockMult);
       if (entity.health <= 0) {
@@ -1797,6 +1888,27 @@ export class PhysicsSandboxWorld {
         drag: 0.985,
         kind: isSparks ? 'spark' : 'blood',
         stains: !isSparks,
+      });
+    }
+  }
+
+  private spawnSparks(x: number, y: number, count: number) {
+    for (let i = 0; i < count; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const spd = 2 + Math.random() * 6;
+      this.spawnParticle({
+        x: x + (Math.random() - 0.5) * 8,
+        y: y + (Math.random() - 0.5) * 8,
+        vx: Math.cos(a) * spd,
+        vy: Math.sin(a) * spd - 1.0,
+        size: 2 + Math.random() * 1.8,
+        color: i % 2 === 0 ? '#818cf8' : '#38bdf8',
+        alpha: 0.95,
+        life: 0.25 + Math.random() * 0.2,
+        gravity: 0.14,
+        drag: 0.96,
+        kind: 'spark',
+        stains: false,
       });
     }
   }
@@ -2398,51 +2510,379 @@ export class PhysicsSandboxWorld {
         }
       }
 
-      // Active self-balancing standing controller!
+      // Behavior timers (panic flee & autonomous walk/pause cycles)
+      if (rd.panicTimer > 0) {
+        rd.panicTimer = Math.max(0, rd.panicTimer - dt);
+      }
+      rd.aiTimer -= dt;
+      if (rd.aiTimer <= 0) {
+        if (rd.aiWalking) {
+          rd.aiWalking = false;
+          rd.aiTimer = 1.2 + Math.random() * 2.2;
+        } else {
+          rd.aiWalking = true;
+          rd.aiTimer = 3.2 + Math.random() * 4.5;
+          if (Math.random() < 0.45) {
+            rd.moveDir = rd.moveDir === 1 ? -1 : 1;
+          }
+        }
+      }
+
+      // Check limb functionality & spinal paralysis
+      const upperLegL = this.entities.get(rd.limbIds.upperLegL);
+      const upperLegR = this.entities.get(rd.limbIds.upperLegR);
+      const upperArmL = this.entities.get(rd.limbIds.upperArmL);
+      const lowerArmL = this.entities.get(rd.limbIds.lowerArmL);
+      const upperArmR = this.entities.get(rd.limbIds.upperArmR);
+      const lowerArmR = this.entities.get(rd.limbIds.lowerArmR);
+
+      const isJointIntact = (part: LimbPart) =>
+        !rd.joints.some((j) => j.broken && j.childLimbId === rd.limbIds[part]);
+
+      const legLWorking = Boolean(
+        rd.paralysis === 'none' &&
+          upperLegL &&
+          lowerLegL &&
+          !upperLegL.isSevered &&
+          !lowerLegL.isSevered &&
+          !upperLegL.frozen &&
+          !lowerLegL.frozen &&
+          isJointIntact('upperLegL') &&
+          isJointIntact('lowerLegL') &&
+          upperLegL.health > upperLegL.maxHealth * 0.5 &&
+          lowerLegL.health > lowerLegL.maxHealth * 0.5
+      );
+      const legRWorking = Boolean(
+        rd.paralysis === 'none' &&
+          upperLegR &&
+          lowerLegR &&
+          !upperLegR.isSevered &&
+          !lowerLegR.isSevered &&
+          !upperLegR.frozen &&
+          !lowerLegR.frozen &&
+          isJointIntact('upperLegR') &&
+          isJointIntact('lowerLegR') &&
+          upperLegR.health > upperLegR.maxHealth * 0.5 &&
+          lowerLegR.health > lowerLegR.maxHealth * 0.5
+      );
+      const canStand = legLWorking && legRWorking;
+
+      const armLWorking = Boolean(
+        rd.paralysis !== 'full' &&
+          upperArmL &&
+          !upperArmL.isSevered &&
+          !upperArmL.frozen &&
+          isJointIntact('upperArmL') &&
+          upperArmL.health > upperArmL.maxHealth * 0.25
+      );
+      const armRWorking = Boolean(
+        rd.paralysis !== 'full' &&
+          upperArmR &&
+          !upperArmR.isSevered &&
+          !upperArmR.frozen &&
+          isJointIntact('upperArmR') &&
+          upperArmR.health > upperArmR.maxHealth * 0.25
+      );
+      const workingArms = (armLWorking ? 1 : 0) + (armRWorking ? 1 : 0);
+
+      const isGrabbed = this.grabbedEntity?.ragdollId === rd.id;
       const isFrozenSolid = upperTorso ? upperTorso.temperature < 2 : false;
       const integrityRatio = totalMaxHealth > 0 ? totalHealth / totalMaxHealth : 0;
+      const isAwake =
+        rd.alive &&
+        rd.consciousness > 24 &&
+        !isFrozenSolid &&
+        rd.boneRotRate <= 0 &&
+        rd.paralysis !== 'full';
+
+      if (!isAwake || isGrabbed || !upperTorso || !lowerTorso || upperTorso.frozen) {
+        continue;
+      }
+
       const balancePower =
-        rd.alive && rd.consciousness > 22 && intactLegs >= 1 && !isFrozenSolid && rd.boneRotRate <= 0
-          ? (rd.consciousness / 100) * Math.max(0.4, integrityRatio) * (1 + rd.adrenaline * 0.004) * (rd.superStrength ? 1.4 : 1)
-          : 0;
+        (rd.consciousness / 100) *
+        Math.max(0.55, integrityRatio) *
+        (1 + rd.adrenaline * 0.003) *
+        (rd.superStrength ? 1.35 : 1);
 
-      if (balancePower > 0.1 && upperTorso && lowerTorso && !upperTorso.frozen) {
-        const feetGrounded =
-          (lowerLegL && !lowerLegL.isSevered && lowerLegL.body.position.y > FLOOR_Y - 58) ||
-          (lowerLegR && !lowerLegR.isSevered && lowerLegR.body.position.y > FLOOR_Y - 58);
+      const stabilizeAngle = (
+        ent: GameEntity | undefined,
+        targetAngle: number,
+        kp: number,
+        kd: number
+      ) => {
+        if (!ent || ent.isSevered || ent.frozen || this.grabbedEntity?.id === ent.id) return;
+        let err = targetAngle - ent.body.angle;
+        while (err > Math.PI) err -= Math.PI * 2;
+        while (err < -Math.PI) err += Math.PI * 2;
+        Matter.Body.setAngularVelocity(
+          ent.body,
+          ent.body.angularVelocity * (1 - kd) + err * kp
+        );
+      };
 
-        const uprightStiffness = 0.088 * balancePower;
-        const stabilizeBody = (ent: GameEntity | undefined, targetAngle: number, mult = 1) => {
-          if (!ent || ent.isSevered || ent.frozen || this.grabbedEntity?.id === ent.id) return;
-          let err = targetAngle - ent.body.angle;
-          while (err > Math.PI) err -= Math.PI * 2;
-          while (err < -Math.PI) err += Math.PI * 2;
-          Matter.Body.setAngularVelocity(
-            ent.body,
-            ent.body.angularVelocity * 0.82 + err * uprightStiffness * mult
+      const setFacingDir = (dir: 1 | -1) => {
+        if (rd.facing === dir) return;
+        rd.facing = dir;
+        for (const lid of Object.values(rd.limbIds)) {
+          const l = this.entities.get(lid);
+          if (l && !l.isSevered) l.facing = dir;
+        }
+      };
+
+      // Update fleeing direction dynamically away from cursor/threat
+      const isFleeing = this.behaviorSettings.fleeOnDamage && rd.panicTimer > 0 && !this.demoMode;
+      if (isFleeing) {
+        const distToMouse = Math.hypot(
+          this.mouseWorld.x - upperTorso.body.position.x,
+          this.mouseWorld.y - upperTorso.body.position.y
+        );
+        if (distToMouse < 850) {
+          rd.threatX = this.mouseWorld.x;
+        }
+        rd.moveDir = upperTorso.body.position.x >= rd.threatX ? 1 : -1;
+      }
+
+      // Arena wall turnaround
+      if (upperTorso.body.position.x < 130 && rd.moveDir === -1) {
+        rd.moveDir = 1;
+      } else if (upperTorso.body.position.x > WORLD_WIDTH - 130 && rd.moveDir === 1) {
+        rd.moveDir = -1;
+      }
+
+      // Compute upper-body mass for mathematically exact gravity support
+      let upperBodyMass = 0;
+      for (const part of [head, upperTorso, lowerTorso, upperArmL, lowerArmL, upperArmR, lowerArmR]) {
+        if (part && !part.isSevered && !part.frozen) {
+          upperBodyMass += part.body.mass;
+        }
+      }
+
+      if (canStand && lowerLegL && lowerLegR && upperLegL && upperLegR) {
+        const groundL = this.getFootGroundY(lowerLegL);
+        const groundR = this.getFootGroundY(lowerLegR);
+        const groundY =
+          groundL !== null && groundR !== null
+            ? Math.min(groundL, groundR)
+            : groundL ?? groundR;
+
+        const uprightErr = Math.abs(upperTorso.body.angle);
+        const wantsWalkOrRun =
+          !this.demoMode && (isFleeing || (this.behaviorSettings.autoWalkCrawl && rd.aiWalking));
+
+        if (groundY !== null && uprightErr < 1.0) {
+          // 1. Exact Gravity Compensation + Critically Damped Height Hold (no sagging or bouncing)
+          const bob = wantsWalkOrRun ? Math.abs(Math.cos(rd.gaitPhase)) * (isFleeing ? 3.8 : 2.0) : 0;
+          const desiredUpperY = groundY - 106 - bob;
+          const desiredLowerY = groundY - 78 - bob;
+
+          const gravCancel = -0.00145 * upperBodyMass * Math.min(1.05, balancePower);
+          const yErrUpper = desiredUpperY - upperTorso.body.position.y;
+          const vyUpper = upperTorso.body.velocity.y;
+          const pdY = Math.max(
+            -0.0042 * upperBodyMass,
+            Math.min(0.0042 * upperBodyMass, (yErrUpper * 0.00024 - vyUpper * 0.00095) * upperBodyMass)
           );
-        };
 
-        stabilizeBody(head, 0, 1.1);
-        stabilizeBody(upperTorso, 0, 1.35);
-        stabilizeBody(lowerTorso, 0, 1.15);
-        if (feetGrounded && intactLegs === 2) {
-          stabilizeBody(this.entities.get(rd.limbIds.upperLegL), -0.05, 0.9);
-          stabilizeBody(this.entities.get(rd.limbIds.lowerLegL), 0.03, 0.9);
-          stabilizeBody(this.entities.get(rd.limbIds.upperLegR), 0.05, 0.9);
-          stabilizeBody(this.entities.get(rd.limbIds.lowerLegR), -0.03, 0.9);
-
-          const desiredTorsoY = FLOOR_Y - 122;
-          const yErr = desiredTorsoY - upperTorso.body.position.y;
-          if (yErr < 18 && yErr > -45 && Math.abs(upperTorso.body.angle) < 0.75) {
-            Matter.Body.applyForce(upperTorso.body, upperTorso.body.position, {
+          Matter.Body.applyForce(upperTorso.body, upperTorso.body.position, {
+            x: 0,
+            y: (gravCancel + pdY) * 0.62,
+          });
+          if (!lowerTorso.frozen) {
+            const yErrLower = desiredLowerY - lowerTorso.body.position.y;
+            const lowerCorr = Math.max(
+              -0.002 * upperBodyMass,
+              Math.min(0.002 * upperBodyMass, (yErrLower * 0.00014 - lowerTorso.body.velocity.y * 0.0005) * upperBodyMass)
+            );
+            Matter.Body.applyForce(lowerTorso.body, lowerTorso.body.position, {
               x: 0,
-              y: -0.0021 * upperTorso.body.mass * balancePower + yErr * 0.00004 * upperTorso.body.mass,
+              y: (gravCancel + pdY) * 0.38 + lowerCorr,
+            });
+          }
+
+          // Light leg weight assist so knees stay crisp under body mass
+          Matter.Body.applyForce(upperLegL.body, upperLegL.body.position, { x: 0, y: -0.00075 * upperLegL.body.mass });
+          Matter.Body.applyForce(upperLegR.body, upperLegR.body.position, { x: 0, y: -0.00075 * upperLegR.body.mass });
+
+          if (wantsWalkOrRun) {
+            // 2A. Active Walking / Fleeing Sprint Gait
+            const d = rd.moveDir;
+            setFacingDir(d);
+            rd.gaitPhase += dt * (isFleeing ? 9.4 : 5.2);
+            const s = Math.sin(rd.gaitPhase);
+
+            stabilizeAngle(head, d * (isFleeing ? 0.08 : 0.03), 0.22, 0.35);
+            stabilizeAngle(upperTorso, d * (isFleeing ? 0.16 : 0.06), 0.28, 0.40);
+            stabilizeAngle(lowerTorso, d * (isFleeing ? 0.08 : 0.02), 0.24, 0.36);
+
+            // Alternating leg stride + natural knee bend
+            const hipAmp = isFleeing ? 0.62 : 0.36;
+            const kneeAmp = isFleeing ? 0.36 : 0.20;
+            stabilizeAngle(upperLegL, d * s * hipAmp, 0.26, 0.32);
+            stabilizeAngle(lowerLegL, d * (s * kneeAmp + (s < 0 ? 0.34 : 0.04)), 0.24, 0.30);
+            stabilizeAngle(upperLegR, -d * s * hipAmp, 0.26, 0.32);
+            stabilizeAngle(lowerLegR, d * (-s * kneeAmp + (s > 0 ? 0.34 : 0.04)), 0.24, 0.30);
+
+            // Counter-swinging arms
+            if (armLWorking) {
+              stabilizeAngle(upperArmL, -d * s * (isFleeing ? 0.72 : 0.28), 0.16, 0.28);
+              stabilizeAngle(lowerArmL, -d * (isFleeing ? 0.55 : 0.14), 0.14, 0.28);
+            }
+            if (armRWorking) {
+              stabilizeAngle(upperArmR, d * s * (isFleeing ? 0.72 : 0.28), 0.16, 0.28);
+              stabilizeAngle(lowerArmR, -d * (isFleeing ? 0.55 : 0.14), 0.14, 0.28);
+            }
+
+            // Smooth horizontal drive force capped to natural walking/sprinting speed
+            const targetVx = d * (isFleeing ? 4.1 : 1.8) * (rd.superStrength ? 1.25 : 1);
+            const vxErr = targetVx - upperTorso.body.velocity.x;
+            const fx = Math.max(
+              -0.0036 * upperBodyMass,
+              Math.min(0.0036 * upperBodyMass, vxErr * 0.00085 * upperBodyMass)
+            );
+            Matter.Body.applyForce(upperTorso.body, upperTorso.body.position, { x: fx * 0.6, y: 0 });
+            Matter.Body.applyForce(lowerTorso.body, lowerTorso.body.position, { x: fx * 0.4, y: 0 });
+          } else {
+            // 2B. Rock-Solid Natural Idle Standing (Zero Leg-Spreading / Zero Sliding!)
+            stabilizeAngle(head, 0, 0.22, 0.36);
+            stabilizeAngle(upperTorso, 0, 0.30, 0.42);
+            stabilizeAngle(lowerTorso, 0, 0.28, 0.40);
+
+            // Straight vertical stance directly under hips
+            stabilizeAngle(upperLegL, -0.015, 0.32, 0.44);
+            stabilizeAngle(lowerLegL, 0.015, 0.32, 0.44);
+            stabilizeAngle(upperLegR, 0.015, 0.32, 0.44);
+            stabilizeAngle(lowerLegR, -0.015, 0.32, 0.44);
+
+            // Natural relaxed arms at sides
+            if (armLWorking) {
+              stabilizeAngle(upperArmL, 0.06, 0.12, 0.26);
+              stabilizeAngle(lowerArmL, 0.03, 0.10, 0.26);
+            }
+            if (armRWorking) {
+              stabilizeAngle(upperArmR, -0.06, 0.12, 0.26);
+              stabilizeAngle(lowerArmR, -0.03, 0.10, 0.26);
+            }
+
+            // Anti-split horizontal foot alignment & sway damping when standing at rest
+            if (Math.abs(upperTorso.body.velocity.x) < 2.2) {
+              const hipX = lowerTorso.body.position.x;
+              const errFootL = hipX - 3.5 - lowerLegL.body.position.x;
+              const errFootR = hipX + 3.5 - lowerLegR.body.position.x;
+              Matter.Body.applyForce(lowerLegL.body, lowerLegL.body.position, {
+                x: Math.max(-0.0018, Math.min(0.0018, errFootL * 0.00018 * lowerLegL.body.mass)),
+                y: 0,
+              });
+              Matter.Body.applyForce(lowerLegR.body, lowerLegR.body.position, {
+                x: Math.max(-0.0018, Math.min(0.0018, errFootR * 0.00018 * lowerLegR.body.mass)),
+                y: 0,
+              });
+              // Keep torso centered over feet so it never slowly drifts/leans over
+              const feetMidX = (lowerLegL.body.position.x + lowerLegR.body.position.x) * 0.5;
+              const comErr = feetMidX - upperTorso.body.position.x;
+              Matter.Body.applyForce(upperTorso.body, upperTorso.body.position, {
+                x: Math.max(-0.0015 * upperBodyMass, Math.min(0.0015 * upperBodyMass, comErr * 0.00011 * upperBodyMass)),
+                y: 0,
+              });
+              // Firm foot traction & micro-sway damping
+              Matter.Body.setVelocity(lowerLegL.body, {
+                x: lowerLegL.body.velocity.x * 0.78,
+                y: lowerLegL.body.velocity.y,
+              });
+              Matter.Body.setVelocity(lowerLegR.body, {
+                x: lowerLegR.body.velocity.x * 0.78,
+                y: lowerLegR.body.velocity.y,
+              });
+              Matter.Body.setVelocity(upperTorso.body, {
+                x: upperTorso.body.velocity.x * 0.90,
+                y: upperTorso.body.velocity.y,
+              });
+            }
+          }
+        } else if (
+          upperTorso.body.position.y > FLOOR_Y - 115 &&
+          Math.abs(upperTorso.body.velocity.y) < 3.5 &&
+          rd.shock < 68 &&
+          !this.demoMode
+        ) {
+          // 2C. Self-Righting Recovery when knocked onto the floor with intact legs
+          stabilizeAngle(head, 0, 0.14, 0.28);
+          stabilizeAngle(upperTorso, 0, 0.16, 0.30);
+          stabilizeAngle(lowerTorso, 0, 0.16, 0.30);
+          stabilizeAngle(upperLegL, 0, 0.18, 0.30);
+          stabilizeAngle(lowerLegL, 0, 0.18, 0.30);
+          stabilizeAngle(upperLegR, 0, 0.18, 0.30);
+          stabilizeAngle(lowerLegR, 0, 0.18, 0.30);
+          Matter.Body.applyForce(upperTorso.body, upperTorso.body.position, {
+            x: 0,
+            y: -0.0022 * upperBodyMass,
+          });
+        }
+      } else if (workingArms >= 1 && !this.demoMode) {
+        // 3. Arm-Crawling Controller (legs shot/crippled/severed OR paraplegia)
+        const wantsCrawl = isFleeing || this.behaviorSettings.autoWalkCrawl;
+        const torsoGrounded =
+          upperTorso.body.position.y > FLOOR_Y - 76 || Math.abs(upperTorso.body.velocity.y) < 1.6;
+
+        if (wantsCrawl && torsoGrounded) {
+          const d = rd.moveDir;
+          setFacingDir(d);
+          rd.gaitPhase += dt * (isFleeing ? 6.8 : 4.2);
+
+          // Prone crawling posture along the floor (chest slightly propped, looking forward)
+          stabilizeAngle(upperTorso, d * 1.24, 0.20, 0.34);
+          stabilizeAngle(lowerTorso, d * 1.48, 0.16, 0.32);
+          stabilizeAngle(head, d * 0.86, 0.20, 0.34);
+
+          // Hand-over-hand reach & pull arm motion
+          const pL = Math.sin(rd.gaitPhase);
+          const pR = Math.sin(rd.gaitPhase + Math.PI);
+          if (armLWorking) {
+            stabilizeAngle(upperArmL, d * (0.28 + pL * 0.82), 0.22, 0.28);
+            stabilizeAngle(lowerArmL, d * (0.85 + pL * 0.45), 0.18, 0.28);
+          }
+          if (armRWorking) {
+            stabilizeAngle(upperArmR, d * (0.28 + pR * 0.82), 0.22, 0.28);
+            stabilizeAngle(lowerArmR, d * (0.85 + pR * 0.45), 0.18, 0.28);
+          }
+
+          // Rhythmic forward crawl pull synced with arm stroke
+          const stroke = 0.45 + 0.55 * Math.abs(Math.cos(rd.gaitPhase));
+          const armMult = workingArms === 2 ? 1.0 : 0.58;
+          const targetCrawlVx = d * (isFleeing ? 1.85 : 1.05) * armMult * stroke;
+          const vxErr = targetCrawlVx - upperTorso.body.velocity.x;
+          const crawlFx = Math.max(
+            -0.0028 * upperBodyMass,
+            Math.min(0.0028 * upperBodyMass, vxErr * 0.00095 * upperBodyMass)
+          );
+          Matter.Body.applyForce(upperTorso.body, upperTorso.body.position, {
+            x: crawlFx * 0.65,
+            y: -0.00048 * upperTorso.body.mass,
+          });
+          if (!lowerTorso.frozen) {
+            Matter.Body.applyForce(lowerTorso.body, lowerTorso.body.position, {
+              x: crawlFx * 0.35,
+              y: -0.00025 * lowerTorso.body.mass,
             });
           }
         }
       }
     }
+  }
+
+  private getFootGroundY(lowerLeg: GameEntity): number | null {
+    const footY = lowerLeg.body.position.y + Math.abs(Math.cos(lowerLeg.body.angle)) * (lowerLeg.height * 0.5);
+    if (footY >= FLOOR_Y - 14) return FLOOR_Y;
+
+    const footX = lowerLeg.body.position.x;
+    for (const other of this.entities.values()) {
+      if (other.kind === 'limb' || other.kind === 'debris' || other.id === lowerLeg.id) continue;
+      const b = other.body.bounds;
+      if (footX >= b.min.x - 5 && footX <= b.max.x + 5 && footY >= b.min.y - 8 && footY <= b.min.y + 16) {
+        return b.min.y;
+      }
+    }
+    return null;
   }
 
   private updateEntities(dt: number) {
@@ -3176,6 +3616,7 @@ export class PhysicsSandboxWorld {
   }
 
   private emitContextMenu(hit: GameEntity, screenX: number, screenY: number) {
+    const rd = hit.ragdollId ? this.ragdolls.get(hit.ragdollId) : undefined;
     this.callbacks.onContextMenu({
       screenX,
       screenY,
@@ -3187,6 +3628,7 @@ export class PhysicsSandboxWorld {
       canActivate: this.isEntityActivatable(hit),
       isRagdoll: Boolean(hit.ragdollId),
       bandaged: hit.bandaged,
+      paralysis: rd ? rd.paralysis : 'none',
     });
   }
 
@@ -3201,6 +3643,7 @@ export class PhysicsSandboxWorld {
       this.callbacks.onSelectionChange(null);
       return;
     }
+    const rd = ent.ragdollId ? this.ragdolls.get(ent.ragdollId) : undefined;
     this.callbacks.onSelectionChange({
       entityId: ent.id,
       label: ent.label,
@@ -3209,6 +3652,7 @@ export class PhysicsSandboxWorld {
       frozen: ent.frozen,
       isRagdoll: Boolean(ent.ragdollId),
       bandaged: ent.bandaged,
+      paralysis: rd ? rd.paralysis : 'none',
     });
   }
 
@@ -3793,6 +4237,8 @@ export class PhysicsSandboxWorld {
           heartRate: Math.round(rd.heartRate),
           intactLimbs: intact,
           bandagedLimbs: bandagedCount,
+          paralysis: rd.paralysis,
+          fleeing: this.behaviorSettings.fleeOnDamage && rd.panicTimer > 0 && rd.alive,
           burning: ent.burning,
           frozen: ent.frozen,
           health: Math.round(ent.health),
@@ -3818,6 +4264,8 @@ export class PhysicsSandboxWorld {
       heartRate: 0,
       intactLimbs: 1,
       bandagedLimbs: 0,
+      paralysis: 'none',
+      fleeing: false,
       burning: ent.burning,
       frozen: ent.frozen,
       health: Math.round(ent.health),

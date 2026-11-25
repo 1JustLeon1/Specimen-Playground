@@ -263,6 +263,14 @@ export const CATALOG_ITEMS: CatalogItem[] = [
     height: 11,
   },
   {
+    id: 'syringe_paralyze',
+    name: 'Paralytic',
+    category: 'medical',
+    shortDesc: 'Blocks motor nerves — paralyzes body while subject stays awake',
+    width: 40,
+    height: 11,
+  },
+  {
     id: 'syringe_freeze',
     name: 'Freeze Serum',
     category: 'medical',

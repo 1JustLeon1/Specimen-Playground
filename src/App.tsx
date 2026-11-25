@@ -9,6 +9,7 @@ import { soundEngine } from './game/audio';
 import { CATALOG_ITEMS } from './game/catalog';
 import { PhysicsSandboxWorld } from './game/physicsWorld';
 import type {
+  BehaviorSettings,
   ContextMenuState,
   GamePhase,
   HudStats,
@@ -43,6 +44,11 @@ export default function App() {
   const [inspectSnapshot, setInspectSnapshot] = useState<InspectSnapshot | null>(null);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [selectedEntity, setSelectedEntity] = useState<SelectedEntitySummary | null>(null);
+  const [behaviorSettings, setBehaviorSettings] = useState<BehaviorSettings>({
+    autoWalkCrawl: false,
+    fleeOnDamage: true,
+    spinalParalysis: true,
+  });
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -131,6 +137,15 @@ export default function App() {
     setMuted((prev) => {
       const next = !prev;
       soundEngine.setMuted(next);
+      return next;
+    });
+  }, []);
+
+  const handleUpdateBehaviorSettings = useCallback((patch: Partial<BehaviorSettings>) => {
+    soundEngine.playClick(540);
+    setBehaviorSettings((prev) => {
+      const next = { ...prev, ...patch };
+      worldRef.current?.setBehaviorSettings(next);
       return next;
     });
   }, []);
@@ -228,6 +243,8 @@ export default function App() {
             activeTool={activeTool}
             onSelectTool={handleSelectTool}
             hudStats={hudStats}
+            behaviorSettings={behaviorSettings}
+            onUpdateBehaviorSettings={handleUpdateBehaviorSettings}
             muted={muted}
             onTogglePause={handleTogglePause}
             onToggleSlowMo={handleToggleSlowMo}

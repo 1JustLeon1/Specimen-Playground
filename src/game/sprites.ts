@@ -649,6 +649,7 @@ export function drawItemGeometry(
     case 'syringe_adrenaline':
     case 'syringe_painkiller':
     case 'syringe_knockout':
+    case 'syringe_paralyze':
     case 'syringe_freeze':
     case 'syringe_strength':
     case 'syringe_acid':
@@ -661,6 +662,7 @@ export function drawItemGeometry(
         syringe_adrenaline: '#facc15',
         syringe_painkiller: '#fb923c',
         syringe_knockout: '#2563eb',
+        syringe_paralyze: '#6366f1',
         syringe_freeze: '#7dd3fc',
         syringe_strength: '#ea580c',
         syringe_acid: '#a3e635',
@@ -855,6 +857,7 @@ export function drawCatalogPreview(canvas: HTMLCanvasElement, itemId: string) {
     syringe_adrenaline: { w: 40, h: 11, s: 0.98, rot: -0.5 },
     syringe_painkiller: { w: 40, h: 11, s: 0.98, rot: -0.5 },
     syringe_knockout: { w: 40, h: 11, s: 0.98, rot: -0.5 },
+    syringe_paralyze: { w: 40, h: 11, s: 0.98, rot: -0.5 },
     syringe_freeze: { w: 40, h: 11, s: 0.98, rot: -0.5 },
     syringe_strength: { w: 40, h: 11, s: 0.98, rot: -0.5 },
     syringe_acid: { w: 40, h: 11, s: 0.98, rot: -0.5 },

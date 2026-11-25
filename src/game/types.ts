@@ -50,6 +50,14 @@ export type EntityKind =
   | 'prop'
   | 'debris';
 
+export type ParalysisState = 'none' | 'lower' | 'full';
+
+export interface BehaviorSettings {
+  autoWalkCrawl: boolean;
+  fleeOnDamage: boolean;
+  spinalParalysis: boolean;
+}
+
 export type SyringeType =
   | 'heal'
   | 'mend'
@@ -57,6 +65,7 @@ export type SyringeType =
   | 'adrenaline'
   | 'painkiller'
   | 'knockout'
+  | 'paralyze'
   | 'freeze'
   | 'acid'
   | 'death'
@@ -160,6 +169,13 @@ export interface RagdollState {
   knockoutTimer: number;
   superStrength: boolean;
   boneRotRate: number;
+  paralysis: ParalysisState;
+  gaitPhase: number;
+  moveDir: 1 | -1;
+  aiTimer: number;
+  aiWalking: boolean;
+  panicTimer: number;
+  threatX: number;
 }
 
 export type ConnectionKind = 'rope' | 'rod' | 'spring' | 'pin' | 'wire' | 'impale' | 'bandage';
@@ -249,6 +265,8 @@ export interface InspectSnapshot {
   heartRate: number;
   intactLimbs: number;
   bandagedLimbs: number;
+  paralysis: ParalysisState;
+  fleeing: boolean;
   burning: boolean;
   frozen: boolean;
   health: number;
@@ -266,6 +284,7 @@ export interface ContextMenuState {
   canActivate: boolean;
   isRagdoll: boolean;
   bandaged: boolean;
+  paralysis: ParalysisState;
 }
 
 export interface SelectedEntitySummary {
@@ -276,6 +295,7 @@ export interface SelectedEntitySummary {
   frozen: boolean;
   isRagdoll: boolean;
   bandaged: boolean;
+  paralysis: ParalysisState;
 }
 
 export interface HudStats {

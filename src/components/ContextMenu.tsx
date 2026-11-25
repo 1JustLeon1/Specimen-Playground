@@ -10,6 +10,7 @@ import {
   Snowflake,
   Trash2,
   Zap,
+  ZapOff,
 } from 'lucide-react';
 import type { ContextMenuState } from '../game/types';
 
@@ -23,6 +24,7 @@ export type ContextActionType =
   | 'inspect'
   | 'heal'
   | 'bandage'
+  | 'paralyze'
   | 'delete';
 
 interface ContextMenuProps {
@@ -34,8 +36,8 @@ interface ContextMenuProps {
 export const ContextMenu: React.FC<ContextMenuProps> = ({ menu, onAction, onClose }) => {
   if (!menu) return null;
 
-  const menuWidth = 212;
-  const menuHeight = menu.isRagdoll ? 360 : 330;
+  const menuWidth = 216;
+  const menuHeight = menu.isRagdoll ? 400 : 330;
   const left = Math.min(Math.max(8, window.innerWidth - menuWidth - 8), Math.max(8, menu.screenX));
   const top = Math.min(Math.max(8, window.innerHeight - menuHeight - 8), Math.max(8, menu.screenY));
 
@@ -44,9 +46,16 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({ menu, onAction, onClos
     onClose();
   };
 
+  const paralyzeLabel =
+    menu.paralysis === 'none'
+      ? 'Paralyze Legs'
+      : menu.paralysis === 'lower'
+      ? 'Full Paralyze'
+      : 'Restore Nerves';
+
   return (
     <div
-      className="fixed z-50 w-[212px] max-h-[calc(100vh-16px)] overflow-y-auto lab-scroll bg-[#181a1e] border border-[#6e7480] text-xs text-[#e4e6eb] shadow-2xl"
+      className="fixed z-50 w-[216px] max-h-[calc(100vh-16px)] overflow-y-auto lab-scroll bg-[#181a1e] border border-[#6e7480] text-xs text-[#e4e6eb] shadow-2xl"
       style={{ left, top }}
       onContextMenu={(e) => e.preventDefault()}
     >
@@ -136,11 +145,20 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({ menu, onAction, onClos
 
             <button
               type="button"
+              onClick={() => run('paralyze')}
+              className="min-h-[40px] px-3 py-2 flex items-center gap-2.5 hover:bg-[#2c313b] text-left cursor-pointer"
+            >
+              <ZapOff className="w-4 h-4 text-[#818cf8]" />
+              <span>{paralyzeLabel}</span>
+            </button>
+
+            <button
+              type="button"
               onClick={() => run('heal')}
               className="min-h-[40px] px-3 py-2 flex items-center gap-2.5 hover:bg-[#2c313b] text-left cursor-pointer"
             >
               <HeartPulse className="w-4 h-4 text-[#4ade80]" />
-              <span>Mend & Revive</span>
+              <span>Mend &amp; Revive</span>
             </button>
           </>
         )}

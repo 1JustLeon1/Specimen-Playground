@@ -97,6 +97,19 @@ export const InspectorPanel: React.FC<InspectorPanelProps> = ({
                   ? 'OBJECT · FROZEN'
                   : 'OBJECT · ACTIVE'}
               </div>
+              {snapshot.isRagdoll && (snapshot.paralysis !== 'none' || snapshot.fleeing) && (
+                <div className="text-[10px] font-mono-lab mt-0.5 flex flex-wrap gap-x-2">
+                  {snapshot.paralysis === 'lower' && (
+                    <span className="text-[#a5b4fc]">PARAPLEGIC (LEGS)</span>
+                  )}
+                  {snapshot.paralysis === 'full' && (
+                    <span className="text-[#818cf8]">PARALYZED (FULL)</span>
+                  )}
+                  {snapshot.fleeing && snapshot.paralysis !== 'full' && (
+                    <span className="text-[#fbbf24]">FLEEING</span>
+                  )}
+                </div>
+              )}
             </div>
             <button
               type="button"
